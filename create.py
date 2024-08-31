@@ -7,8 +7,7 @@ import os
 import subprocess
 import re
 import shutil
-import multiprocessing as mp
-from functools import partial
+
 
 def UniqueQuartet(q):
   if q[0] < q[1]:
@@ -30,50 +29,6 @@ def QStr(q):
   return "( {} {} | {} {} )".format(q[0], q[1], q[2], q[3])
 
 
-# The following function allows the use of multiprocess package
-def runostei(lock, arg):
-  i, q = arg
-  lock.acquire()
-  filebase = base+"_{}_{}_{}_{}".format(amchar[q[0]], amchar[q[1]], amchar[q[2]], amchar[q[3]])
-  outfile = os.path.join(outdir_osteigen, filebase + ".c")
-  logfile = os.path.join(outdir_osteigen, filebase + ".log")
-  print("Creating: {}\n      Output: {}\n     Logfile: {}\n     {}/{} ".format(filebase,outfile,logfile,i+1,tot))
-
-  with open(logfile, 'w') as lf:
-    cmdline = [cmd];
-    cmdline.extend(["-q", str(q[0]), str(q[1]), str(q[2]), str(q[3])])
-    cmdline.extend(["-o", outfile])
-    cmdline.extend(["-oh", headerfile])
-    cmdline.extend(["-ve", str(args.ve)])
-    cmdline.extend(["-vg", str(args.vg)])
-    cmdline.extend(["-he", str(args.he)])
-    cmdline.extend(["-hg", str(args.hg)])
-
-    if max(q) >= args.p:
-        cmdline.append("-p")
-
-    print()
-    print("Command line:")
-    print(' '.join(cmdline))
-    print()
-    lock.release()
-
-    ret = subprocess.call(cmdline, stdout=lf, stderr=lf)
-
-    if ret != 0:
-      lock.acquire()
-      print("\n")
-      print("*********************************")
-      print("While generating "+base)
-      print("Subprocess returned {} - aborting".format(ret))
-      print("*********************************")
-      print("\n")
-      lock.release()
-      # quit(5)
-
-    return ret
-
-
 
 # path to this file
 thisfile = os.path.realpath(__file__)
@@ -83,7 +38,6 @@ topdir = os.path.dirname(thisfile)
 amchar = "spdfghiklmnoqrtuvwxyzabceSPDFGHIKLMNOQRTUVWXYZABCE0123456789"
 
 parser = argparse.ArgumentParser()
-parser.add_argument("-n", type=int, required=False, default=1, help="Number of parallel processes to use with generator")
 parser.add_argument("-g", type=str, required=True, help="Path to directory with generator programs")
 parser.add_argument("-l", type=int, required=True, help="Maximum AM")
 parser.add_argument("-p", type=int, required=True, help="Start permuting the slow way when AM of a center reaches this value")
@@ -92,7 +46,6 @@ parser.add_argument("-vg", required=False, type=int, default=0, help="General VR
 parser.add_argument("-he", required=False, type=int, default=0, help="External HRR for this L value and above")
 parser.add_argument("-hg", required=False, type=int, default=0, help="General HRR for this L value and above")
 parser.add_argument("-d", required=False, type=int, default=0, help="Maximum derivative to generate code for")
-parser.add_argument("-printq", required=False, action="store_true", help="Print out the list of valid quartets")
 parser.add_argument("outdir", type=str, help="Output directory")
 
 args = parser.parse_args()
@@ -190,15 +143,14 @@ for i in range(0, maxam + 1):
         else:
           invalid.add(q)
 
-if args.printq:
-  print()
-  print("Valid: {}".format(len(valid)))
-  for q in valid:
-    print("  {}".format(QStr(q)))
+print()
+print("Valid: {}".format(len(valid)))
+for q in valid:
+  print("  {}".format(QStr(q)))
 
-  print()
-  print("==========================================================================================")
-  print()
+print()
+print("==========================================================================================")
+print()
 
 
 # Generate the ostei
@@ -240,27 +192,45 @@ with open(headerfile, 'w') as hfile:
   hfile.write("#endif\n")
   hfile.write("\n")
 
-# Define some global variables for all processes
-global cmd
-global base
-global tot
-cmd = ostei_gen
-base = "ostei"
-tot = len(valid)
 
-# Run generator in args.n processes
-mp.set_start_method('fork')
-with mp.Pool(processes=args.n) as pool:
-  m = mp.Manager()
-  l = m.Lock()
-  f = partial(runostei, l)
-  pool.map(f, enumerate(valid), chunksize=1)
-
-# Update arrays after multiprocess for simplicity
 for q in valid:
   filebase = "ostei_{}_{}_{}_{}".format(amchar[q[0]], amchar[q[1]], amchar[q[2]], amchar[q[3]])
+  outfile = os.path.join(outdir_osteigen, filebase + ".c")
   logfile = os.path.join(outdir_osteigen, filebase + ".log")
   filelists[0][max(q)].append(filebase + ".c")
+  print("Creating: {}".format(filebase))
+  print("      Output: {}".format(outfile))
+  print("     Logfile: {}".format(logfile))
+
+  with open(logfile, 'w') as lf:
+    cmdline = [ostei_gen];
+    cmdline.extend(["-q", str(q[0]), str(q[1]), str(q[2]), str(q[3])])
+    cmdline.extend(["-o", outfile])
+    cmdline.extend(["-oh", headerfile])
+    cmdline.extend(["-ve", str(args.ve)]) 
+    cmdline.extend(["-vg", str(args.vg)]) 
+    cmdline.extend(["-he", str(args.he)]) 
+    cmdline.extend(["-hg", str(args.hg)]) 
+
+    if max(q) >= args.p:
+        cmdline.append("-p")
+
+    print()
+    print("Command line:")
+    print(' '.join(cmdline))
+    print()
+
+    ret = subprocess.call(cmdline, stdout=lf, stderr=lf)
+
+    if ret != 0:
+      print("\n")
+      print("*********************************")
+      print("While generating ostei")
+      print("Subprocess returned {} - aborting".format(ret))
+      print("*********************************")
+      print("\n")
+      quit(5)
+
 
   # reopen the logfile, find work and requirements
   for line in open(logfile, 'r').readlines():
@@ -284,7 +254,7 @@ for q in valid:
                                                              amchar[int(reqam[3])],
                                                              amchar[int(reqam[4])]) )
 
-print()
+  print()
 
 
 # Close out the header file
@@ -362,24 +332,45 @@ with open(headerfile, 'w') as hfile:
   hfile.write("\n")
 
 
-# Define some global variables for all processes
-cmd = ostei_deriv1_gen
-base = "ostei_deriv1"
-tot = len(valid)
-
-# Run generator in args.n processes
-with mp.Pool(processes=args.n) as pool:
-  m = mp.Manager()
-  l = m.Lock()
-  f = partial(runostei, l)
-  pool.map(f, enumerate(valid), chunksize=1)
-
-
-# Update lists after multiprocess for simplicity
 for q in valid:
+
   filebase = "ostei_deriv1_{}_{}_{}_{}".format(amchar[q[0]], amchar[q[1]], amchar[q[2]], amchar[q[3]])
+  outfile = os.path.join(outdir_osteigen, filebase + ".c")
   logfile = os.path.join(outdir_osteigen, filebase + ".log")
   filelists[1][max(q)].append(filebase + ".c")
+  print("Creating: {}".format(filebase))
+  print("      Output: {}".format(outfile))
+  print("     Logfile: {}".format(logfile))
+
+  with open(logfile, 'w') as lf:
+    cmdline = [ostei_deriv1_gen];
+    cmdline.extend(["-q", str(q[0]), str(q[1]), str(q[2]), str(q[3])])
+    cmdline.extend(["-o", outfile])
+    cmdline.extend(["-oh", headerfile])
+    cmdline.extend(["-ve", str(args.ve)]) 
+    cmdline.extend(["-vg", str(args.vg)]) 
+    cmdline.extend(["-he", str(args.he)]) 
+    cmdline.extend(["-hg", str(args.hg)]) 
+
+    if max(q) >= args.p:
+        cmdline.append("-p")
+
+    print()
+    print("Command line:")
+    print(' '.join(cmdline))
+    print()
+
+    ret = subprocess.call(cmdline, stdout=lf, stderr=lf)
+
+    if ret != 0:
+      print("\n")
+      print("*********************************")
+      print("While generating ostei_deriv1")
+      print("Subprocess returned {} - aborting".format(ret))
+      print("*********************************")
+      print("\n")
+      quit(5)
+
 
   # reopen the logfile, find work and requirements
   for line in open(logfile, 'r').readlines():
